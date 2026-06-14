@@ -7,7 +7,14 @@ on:
   pull_request:
     branches: [ master, desenvolvimento ]
 
+# CONCEDENDO PERMISSÕES DE ESCRITA PARA O PIPELINE (Corrige o Erro 403)
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
 jobs:
+  
   # ==========================================================
   # ESTÁGIO 1: COMPILAÇÃO, INTERPRETAÇÃO E VALIDAÇÃO DE DEPENDÊNCIAS
   # ==========================================================
@@ -98,10 +105,39 @@ jobs:
       continue-on-error: true
 
     # 4. Consolidação de todos os Relatórios em um único Artefato para Download
-    - name: Salvar Relatorios como Artefato do Pipeline
+    - name: Salvar Relatorios SAST
       uses: actions/upload-artifact@v4
       with:
         name: relatorios-sast-seguranca
         path: |
           bandit-report.txt
           dependency-check-report.html
+
+   # ==========================================================
+  # ESTÁGIO 4: ANÁLISE DINÂMICA DE SEGURANÇA (DAST - ETAPA 5)
+  # ==========================================================
+  security-dast:
+    needs: security-sast
+    runs-on: ubuntu-latest
+    steps:
+    - name: Baixar codigo do repositorio
+      uses: actions/checkout@v4
+
+    - name: Inicializar a Aplicacao em Segundo Plano (Alvo do DAST)
+      run: |
+        docker build -t taskmanager-app:production .
+        docker run -d -p 5000:5000 --name app-alvo taskmanager-app:production
+        sleep 5
+
+    - name: Executar OWASP ZAP Baseline Scan (Apenas Relatorio)
+      # Mudamos para a sintaxe puramente CLI via container oficial para gerar o artefato sem depender de API do GitHub
+      run: |
+        docker run --rm --network="host" -v "$(pwd)":/zap/wrk/:rw ghcr.io/zaproxy/zaproxy:stable zap-baseline.py -t http://localhost:5000 -r zap-report-dast.html
+      continue-on-error: true
+
+    - name: Salvar Relatorio DAST como Artefato
+      uses: actions/upload-artifact@v4
+      with:
+        name: relatorio-dast-zap
+        path: zap-report-dast.html
+          
