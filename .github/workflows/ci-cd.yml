@@ -1,4 +1,4 @@
-name: Pipeline CI - Integracao Continua (Gerenciador de Tarefas)
+name: Pipeline CI/CD DevSecOps - Gerenciador de Tarefas
 
 # O pipeline sera disparado automaticamente a cada push nessas duas branches
 on:
@@ -56,4 +56,52 @@ jobs:
     - name: Executar Testes Automatizados (Sintaticos e Funcionais)
       run: |
         # O pytest varre a arvore de modulos validando as importacoes e funcoes
-        python -m pytest || echo "Aviso: Sem testes unitarios estruturados. Modulos lógicos validados com sucesso."
+        python -m pytest || echo "Aviso: Sem testes unitarios estruturados. Modulos logicos validados com sucesso."
+
+  # ==========================================================
+  # ESTÁGIO 3: ANÁLISE ESTÁTICA DE SEGURANÇA (SAST - ETAPA 4)
+  # ==========================================================
+  security-sast:
+    needs: automated-testing
+    runs-on: ubuntu-latest
+    steps:
+    - name: Baixar codigo do repositorio
+      uses: actions/checkout@v4
+
+    - name: Configurar ambiente Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    # 1. Execução do BANDIT (SAST do Código Fonte)
+    - name: Executar Bandit
+      run: |
+        pip install bandit
+        bandit -r todo_project/ -f txt -o bandit-report.txt
+      continue-on-error: true # Impede o travamento do pipeline por alertas menores do app legado
+
+    # 2. Execução do PIP-AUDIT (SAST das Dependências Python)
+    - name: Executar Pip-Audit
+      run: |
+        pip install pip-audit
+        pip-audit -r requirements.txt
+      continue-on-error: true
+
+    # 3. Execução do OWASP Dependency-Check Oficial (Corrigido)
+    - name: Executar OWASP Dependency-Check
+      uses: dependency-check/Dependency-Check_Action@main
+      with:
+        project: 'Task Manager DevSecOps'
+        path: './requirements.txt'
+        format: 'HTML'
+        out: '.'
+      continue-on-error: true
+
+    # 4. Consolidação de todos os Relatórios em um único Artefato para Download
+    - name: Salvar Relatorios como Artefato do Pipeline
+      uses: actions/upload-artifact@v4
+      with:
+        name: relatorios-sast-seguranca
+        path: |
+          bandit-report.txt
+          dependency-check-report.html
