@@ -140,4 +140,74 @@ jobs:
       with:
         name: relatorio-dast-zap
         path: zap-report-dast.html
-          
+
+  # ==========================================================
+  # ESTÁGIO 5: MONITORAMENTO E OBSERVABILIDADE (APENAS DOCKER)
+  # ==========================================================
+  monitoring-and-observability:
+    needs: security-dast
+    runs-on: ubuntu-latest
+    steps:
+    - name: Baixar codigo do repositorio
+      uses: actions/checkout@v4
+
+    - name: Inicializar Container do Prometheus
+      run: |
+        # Evita conflitos de pastas fantasmas limpando o diretório de destino
+        rm -rf ${{ github.workspace }}/monitoring/prometheus.yml
+        mkdir -p ${{ github.workspace }}/monitoring
+
+        # Cria a configuração dinamicamente direto no runner
+        cat << 'EOF' > ${{ github.workspace }}/monitoring/prometheus.yml
+        global:
+          scrape_interval: 15s
+
+        scrape_configs:
+          - job_name: 'taskmanager-app'
+            static_configs:
+              - targets: ['localhost:5000']
+        EOF
+
+        # Roda o container mapeando o arquivo criado em tempo de execução
+        docker run -d \
+          --name prometheus_app \
+          --network="host" \
+          -v ${{ github.workspace }}/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml \
+          prom/prometheus:latest
+
+    - name: Inicializar Container do Grafana
+      run: |
+        docker run -d \
+          --name grafana_app \
+          --network="host" \
+          -e "GF_SECURITY_ADMIN_PASSWORD=admin" \
+          grafana/grafana:latest
+
+    - name: Aguardar Inicializacao dos Servicos
+      run: sleep 15
+
+    - name: Validar Saude do Prometheus
+      run: |
+        curl -f http://localhost:9090/-/healthy || exit 1
+
+    - name: Validar Saude do Grafana
+      run: |
+        curl -f http://localhost:3000/api/health || exit 1
+
+    - name: Exibir Logs dos Containers de Monitoramento
+      if: always()
+      run: |
+        echo "========================================="
+        echo "=== LOGS DO PROMETHEUS ==="
+        echo "========================================="
+        docker logs prometheus_app --tail 50 || true
+        
+        echo "========================================="
+        echo "=== LOGS DO GRAFANA ==="
+        echo "========================================="
+        docker logs grafana_app --tail 50 || true
+
+    - name: Limpar Containers de Monitoramento
+      if: always()
+      run: |
+        docker rm -f prometheus_app grafana_app || true
